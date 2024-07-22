@@ -41,11 +41,13 @@ AM_CONDITIONAL(FEATURE_VTS_BRIDGE_UTIL, test "x$VTS_BRIDGE_UTIL_ENABLED" = xtrue
 AC_ARG_ENABLE([core_net_lib_feature_support],
 [  --enable-core_net_lib_feature_support=val Turn on core_net_lib Feature, val=true or false],
 [case "${enableval}" in
-  yes) core_net_lib_feature_support=true ;;
+  yes) core_net_lib_feature_support=true 
+  	GTEST_CORE_NET_LIB="-DCORE_NET_LIB";;
   no)  core_net_lib_feature_support=false ;;
   *) AC_MSG_ERROR([bad value ${enableval} for --enable-core_net_lib_feature_support]) ;;
 esac],[core_net_lib_feature_support=false])
 AM_CONDITIONAL(CORE_NET_LIB_FEATURE_SUPPORT, test x"$core_net_lib_feature_support" = x"true")
+AC_SUBST(GTEST_CORE_NET_LIB)
 
 AC_PREFIX_DEFAULT(`pwd`)
 AC_ENABLE_SHARED
@@ -174,6 +176,8 @@ AM_COND_IF([BRIDGE_UTILS_BIN_ENABLE], [AC_CONFIG_FILES([source/bridge_utils/brid
 AM_COND_IF([RDKSCHEDULER_TESTAPP_ENABLE], [AC_CONFIG_FILES([source/RdkSchdeuler_TestApp/Makefile])])
 
 AM_COND_IF([SOCKET_EXAMPLE_ENABLE], [AC_CONFIG_FILES([source/Socket_Example/Makefile])])
+
+AC_SUBST(GTEST_CORE_NET_LIB)
 
 AC_SUBST(UNIT_TEST_DOCKER_SUPPORT)
 

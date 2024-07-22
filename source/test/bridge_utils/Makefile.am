@@ -43,7 +43,7 @@ bridgeUtils_gtest_bin_SOURCES = bridgeUtilsTest.cpp \
                                 $(top_srcdir)/source/bridge_utils/bridge_utils_bin/bridge_util.c \
                                 $(top_srcdir)/source/bridge_utils/bridge_utils_bin/bridge_creation.c \
                                 mocks/mock_ovs.cpp \
-                                mocks/mock_bridge_util_generic.cpp
+                                mocks/mock_bridge_util_generic.cpp 
 
 bridgeUtils_gtest_bin_LDFLAGS = -lgtest -lgmock -lgcov -lrt -lpthread
 
@@ -57,12 +57,13 @@ bridgeUtils_gtest_bin_LDADD = \
     $(HOME)/usr/local/lib/libmock_file_io.la \
     $(HOME)/usr/local/lib/libmock_secure_wrapper.la \
     $(HOME)/usr/local/lib/libmock_privilege.la \
-    $(HOME)/usr/local/lib/libmock_ccsp_common.la
+    $(HOME)/usr/local/lib/libmock_ccsp_common.la \
+    $(HOME)/usr/local/lib/libmock_libnet.la
 
 AM_CFLAGS += -fprofile-arcs -ftest-coverage
 AM_CXXFLAGS += -fprofile-arcs -ftest-coverage
 bridgeUtils_gtest_bin_LDFLAGS += --coverage
 
 if CORE_NET_LIB_FEATURE_SUPPORT
-bridgeUtils_gtest_bin_LDFLAGS += -lnet
+bridgeUtils_gtest_bin_CPPFLAGS += $(GTEST_CORE_NET_LIB)
 endif

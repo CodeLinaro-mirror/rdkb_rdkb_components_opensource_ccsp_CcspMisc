@@ -87,8 +87,8 @@ else
 fi
 
 # Run configure with specific options
-log "INFO" "Running configure with option --enable-unitTestDockerSupport..."
-if ./configure --enable-unitTestDockerSupport; then
+log "INFO" "Running configure with options --enable-unitTestDockerSupport..."
+if ./configure --enable-unitTestDockerSupport --enable-core_net_lib_feature_support; then
     log "INFO" "Configuration successful."
 else
     log "ERROR" "Configuration failed."

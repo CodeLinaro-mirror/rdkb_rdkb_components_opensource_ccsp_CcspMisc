@@ -42,6 +42,7 @@
 #include <mocks/mock_usertime.h>
 #include <mocks/mock_ansc_wrapper_api.h>
 #include <mocks/mock_trace.h>
+#include <mocks/mock_libnet.h>
 
 using namespace std;
 using std::experimental::filesystem::exists;
@@ -50,6 +51,22 @@ extern "C"
 {
 #include "bridge_util.h"
 #include "bridge_util_hal.h"
+libnet_status addr_derive_broadcast(char *ip, unsigned int prefix_len, char *bcast, int size);
+libnet_status addr_add(char *args);
+libnet_status interface_up(char *if_name);
+libnet_status rule_add(char *arg);
+libnet_status interface_set_flags(char *if_name, unsigned int flags);
+libnet_status interface_down(char *if_name);
+libnet_status interface_set_netmask(const char* if_name, const char *netmask);
+libnet_status interface_delete(char *name);
+libnet_status bridge_get_info(char *bridge_name, struct bridge_info *bridge);
+libnet_status interface_add_to_bridge(const char* bridge_name, const char* if_name);
+libnet_status interface_remove_from_bridge (const char *if_name);
+libnet_status vlan_delete(const char* vlan_name);
+libnet_status bridge_delete(const char* bridge_name);
+libnet_status vlan_create(const char *if_name, int vid);
+libnet_status bridge_create(const char* bridge_name);
+
 }
 
 extern int ovsEnable, bridgeUtilEnable, skipWiFi, skipMoCA, eb_enable;
@@ -80,6 +97,7 @@ BaseAPIMock * g_baseapiMock = NULL;
 UserTimeMock * g_usertimeMock = NULL;
 AnscWrapperApiMock * g_anscWrapperApiMock = NULL;
 TraceMock * g_traceMock = NULL;
+LibnetMock * g_libnetMock = NULL;
 
 class BridgeUtilsTestFixture : public ::testing::TestWithParam<int> {
     protected:
@@ -92,7 +110,7 @@ class BridgeUtilsTestFixture : public ::testing::TestWithParam<int> {
         MessageBusMock mockedMsgbus;
         UtilMock  mockedUtil;
         OvsMock mockedOvs;
-	    BridgeUtilsGenericMock mockedGeneric;
+	BridgeUtilsGenericMock mockedGeneric;
         SecureWrapperMock mockedsecurewrapper;
         CapMock mockedcapMock;                
         AnscMemoryMock mockedanscMemoryMock;
@@ -100,6 +118,7 @@ class BridgeUtilsTestFixture : public ::testing::TestWithParam<int> {
         UserTimeMock mockedUsertime;
         AnscWrapperApiMock mockedAnscWrapperApi;
         TraceMock mockedTrace;
+        LibnetMock mockedLibnet;
 
         BridgeUtilsTestFixture()
         {
@@ -120,7 +139,8 @@ class BridgeUtilsTestFixture : public ::testing::TestWithParam<int> {
 	    g_usertimeMock = &mockedUsertime;
             g_anscWrapperApiMock = &mockedAnscWrapperApi;
             g_traceMock = &mockedTrace;
-
+	    g_anscMemoryMock        =  &mockedanscMemoryMock;
+            g_libnetMock = &mockedLibnet;
         }
 
         virtual ~BridgeUtilsTestFixture()
@@ -142,6 +162,8 @@ class BridgeUtilsTestFixture : public ::testing::TestWithParam<int> {
             g_usertimeMock = NULL;
             g_anscWrapperApiMock = NULL;
             g_traceMock = NULL;
+            g_anscMemoryMock        = NULL ;  
+            g_libnetMock = NULL; 
         }
         virtual void SetUp()
         {
@@ -343,22 +365,68 @@ TEST(BridgeUtils, removeIfaceFromList)
 }
 
 TEST_F(BridgeUtilsTestFixture, enableMoCaIsolationSettingsPSMFail) {
+    using namespace testing;
     bridgeDetails bridgeInfo = {};
     strncpy(bridgeInfo.bridgeName, "brlan0", sizeof(bridgeInfo.bridgeName) - 1);
-
     const char* paramNames[] = {
         "dmsb.MultiLAN.MoCAIsoLation_l3net",
         "dmsb.l3net.0.V4Addr",
         "dmsb.l2net.1.Name",
         "dmsb.l3net.0.V4SubnetMask"
     };
-
     for (const auto& paramName : paramNames) {
         EXPECT_CALL(*g_psmMock, PSM_Get_Record_Value2(_, _, StrEq(paramName), _, _))
             .Times(1)
             .WillOnce(Return(9005));
     }
 
+    #ifdef CORE_NET_LIB
+    
+    const char* subNetMask = "255.255.255.0";
+    const char* ipAddr = "";
+    char args[300] = {0};
+    unsigned int prefix_len = 0;
+    char bcast[INET_ADDRSTRLEN] = "";
+    int size = INET_ADDRSTRLEN;
+
+    char expectedArgs1[300];
+    snprintf(expectedArgs1, sizeof(expectedArgs1), "/0 broadcast  dev %s", bridgeInfo.bridgeName);
+
+    EXPECT_CALL(*g_libnetMock, addr_add(StrEq(expectedArgs1)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    char expectedArgs2[300];
+    snprintf(expectedArgs2, sizeof(expectedArgs2), "dev %s ", bridgeInfo.bridgeName);
+
+    EXPECT_CALL(*g_libnetMock, addr_add(StrEq(expectedArgs2)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    EXPECT_CALL(*g_libnetMock, interface_set_flags(bridgeInfo.bridgeName, Eq(512)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    EXPECT_CALL(*g_libnetMock, interface_up(bridgeInfo.bridgeName))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    char expectedCommand[256];
+    snprintf(expectedCommand, sizeof(expectedCommand), "echo 0 > /proc/sys/net/ipv4/conf/'%s'/rp_filter ;\t\t\t\ttouch %s ", bridgeInfo.bridgeName, LOCAL_MOCABR_UP_FILE);
+
+    EXPECT_CALL(*g_securewrapperMock, v_secure_system(StrEq(expectedCommand), _))
+        .Times(1)
+        .WillOnce(Return(0));
+
+    EXPECT_CALL(*g_securewrapperMock, v_secure_system(StrEq("echo 0 > /proc/sys/net/ipv4/icmp_echo_ignore_broadcasts ;\t\t\t\tsysctl -w net.ipv4.conf.all.arp_announce=3 ;"), _))
+        .Times(1)
+        .WillOnce(Return(0));
+
+    EXPECT_CALL(*g_libnetMock, rule_add(StrEq("from all iif brlan0 lookup all_lans")))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS)); 
+        
+    #else
     const char* expectedCommand = "ip link set %s allmulticast on ;\
         ifconfig %s %s ; \
         ip link set %s up ; \
@@ -367,19 +435,19 @@ TEST_F(BridgeUtilsTestFixture, enableMoCaIsolationSettingsPSMFail) {
         ip rule add from all iif %s lookup all_lans ; \
         echo 0 > /proc/sys/net/ipv4/conf/%s/rp_filter ;\
         touch %s ;";
-
     EXPECT_CALL(*g_securewrapperMock, v_secure_system(::testing::HasSubstr("ip link set "), _))
         .Times(1)
         .WillOnce(Return(0));
 
+    #endif
     enableMoCaIsolationSettings(&bridgeInfo);
-
     EXPECT_STREQ(primaryBridgeName, "");
 }
 
 TEST_F(BridgeUtilsTestFixture, enableMoCaIsolationSettings) 
 {
-    char ipaddr[64] = {};
+    using namespace testing;
+    const char* ipAddr = "192.168.10.12";
     bridgeDetails bridgeInfo = {};
     strncpy(bridgeInfo.bridgeName, "brlan0", sizeof(bridgeInfo.bridgeName) - 1);
 
@@ -404,6 +472,54 @@ TEST_F(BridgeUtilsTestFixture, enableMoCaIsolationSettings)
             ));
     }
 
+    
+    #ifdef CORE_NET_LIB
+    
+    const char* subNetMask = "255.255.255.0";
+    
+    char args[300] = {0};
+    unsigned int prefix_len = 24;
+    char bcast[INET_ADDRSTRLEN] = "";
+    int size = INET_ADDRSTRLEN;
+
+    char expectedArgs1[300];
+    snprintf(expectedArgs1, sizeof(expectedArgs1), "%s/%d broadcast  dev %s", ipAddr, prefix_len,bridgeInfo.bridgeName);
+
+    EXPECT_CALL(*g_libnetMock, addr_add(StrEq(expectedArgs1)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    char expectedArgs2[300];
+    snprintf(expectedArgs2, sizeof(expectedArgs2), "dev %s %s", bridgeInfo.bridgeName,ipAddr);
+
+    EXPECT_CALL(*g_libnetMock, addr_add(StrEq(expectedArgs2)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    EXPECT_CALL(*g_libnetMock, interface_set_flags(bridgeInfo.bridgeName, Eq(512)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    EXPECT_CALL(*g_libnetMock, interface_up(bridgeInfo.bridgeName))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    char expectedCommand[256];
+    snprintf(expectedCommand, sizeof(expectedCommand), "echo 0 > /proc/sys/net/ipv4/conf/'%s'/rp_filter ;\t\t\t\ttouch %s ", bridgeInfo.bridgeName, LOCAL_MOCABR_UP_FILE);
+
+    EXPECT_CALL(*g_securewrapperMock, v_secure_system(StrEq(expectedCommand), _))
+        .Times(1)
+        .WillOnce(Return(0));
+
+    EXPECT_CALL(*g_securewrapperMock, v_secure_system(StrEq("echo 0 > /proc/sys/net/ipv4/icmp_echo_ignore_broadcasts ;\t\t\t\tsysctl -w net.ipv4.conf.all.arp_announce=3 ;"), _))
+        .Times(1)
+        .WillOnce(Return(0));
+
+    EXPECT_CALL(*g_libnetMock, rule_add(StrEq("from all iif brlan0 lookup all_lans")))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS)); 
+        
+    #else
     char expectedCommand[1024] = {};
     snprintf(expectedCommand, sizeof(expectedCommand), 
         "ip link set %s allmulticast on ;\t"
@@ -427,6 +543,8 @@ TEST_F(BridgeUtilsTestFixture, enableMoCaIsolationSettings)
         .Times(1)
         .WillOnce(Return(0));
 
+    #endif
+
     enableMoCaIsolationSettings(&bridgeInfo);
     EXPECT_STREQ(primaryBridgeName, params[3].expectedValue);
 }
@@ -437,9 +555,16 @@ TEST_F(BridgeUtilsTestFixture, disableMoCaIsolationSettings)
     memset(&bridgeInfo, 0, sizeof(bridgeDetails));
     strncpy(bridgeInfo.bridgeName, "brlan0", sizeof(bridgeInfo.bridgeName) - 1);
 
+    #ifdef CORE_NET_LIB
+    EXPECT_CALL(*g_libnetMock, interface_down(bridgeInfo.bridgeName))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+    #else
     EXPECT_CALL(*g_securewrapperMock, v_secure_system(::testing::HasSubstr("ip link set "), _))
         .Times(1)
         .WillOnce(Return(0));
+
+    #endif
 
     disableMoCaIsolationSettings(&bridgeInfo);
 }
@@ -664,6 +789,7 @@ TEST_F(BridgeUtilsTestFixture, wait_for_gre_ready_syseventFailed)
 
 TEST_F(BridgeUtilsTestFixture, assignIpToBridge)
 {
+    using namespace testing;
     char bridgeName[] = "brlan10";
     char l3netName[] = "dmsb.MultiLAN.MeshBhaul_l3net";
 
@@ -697,12 +823,47 @@ TEST_F(BridgeUtilsTestFixture, assignIpToBridge)
             ::testing::Return(100)
         ));
 
+    #ifdef CORE_NET_LIB
+    const char* ipAddr = "192.168.10.11";
+    unsigned int prefix_len = 18;
+    int size = INET_ADDRSTRLEN;
+    const char* subNetMask = "192.168.255.255";
+
+    EXPECT_CALL(*g_libnetMock, addr_derive_broadcast(StrEq(ipAddr), Eq(prefix_len), NotNull(), Eq(size)))
+    .Times(1)
+    .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    char expectedArgs1[300];
+    snprintf(expectedArgs1, sizeof(expectedArgs1), "%s/%d broadcast  dev %s", ipAddr, prefix_len,bridgeName);
+
+    EXPECT_CALL(*g_libnetMock, addr_add(StrEq(expectedArgs1)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    char expectedArgs2[300];
+    snprintf(expectedArgs2, sizeof(expectedArgs2), "dev %s %s", bridgeName,ipAddr);
+
+    EXPECT_CALL(*g_libnetMock, addr_add(StrEq(expectedArgs2)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    EXPECT_CALL(*g_libnetMock, interface_set_netmask(StrEq(bridgeName), StrEq(subNetMask)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    EXPECT_CALL(*g_libnetMock, interface_up(bridgeName))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+    #else
+
     char expectedCmd[256] = {0};
     snprintf(expectedCmd, sizeof(expectedCmd), "ifconfig %s %s netmask %s up", bridgeName, expectedValue2, expectedValue3);
 
     EXPECT_CALL(*g_securewrapperMock, v_secure_system(StrEq(expectedCmd),_))
         .Times(1)
         .WillOnce(Return(0));
+
+    #endif
 
     assignIpToBridge(bridgeName, l3netName);
 }
@@ -742,11 +903,42 @@ TEST_F(BridgeUtilsTestFixture, assignIpToBridgeNoSubnet)
             SetPsmValueArg4(&expectedValue3),
             ::testing::Return(100)
         ));
+
+    
+    #ifdef CORE_NET_LIB
+    using namespace testing;
+    const char* ipAddr = "192.168.10.9";
+    unsigned int prefix_len = 24;
+    int size = INET_ADDRSTRLEN;
+    
+
+    EXPECT_CALL(*g_libnetMock, addr_derive_broadcast(StrEq(ipAddr), Eq(prefix_len), NotNull(), Eq(size)))
+    .Times(1)
+    .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    char expectedArgs1[300];
+    snprintf(expectedArgs1, sizeof(expectedArgs1), "%s/%d broadcast  dev %s", ipAddr, prefix_len,bridgeName);
+
+    EXPECT_CALL(*g_libnetMock, addr_add(StrEq(expectedArgs1)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    char expectedArgs2[300];
+    snprintf(expectedArgs2, sizeof(expectedArgs2), "dev %s %s", bridgeName,ipAddr);
+
+    EXPECT_CALL(*g_libnetMock, addr_add(StrEq(expectedArgs2)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    #else
+
     char expectedCmd[216] = {0};
     snprintf(expectedCmd,sizeof(expectedCmd),"ifconfig %s %s",bridgeName,expectedValue2);
     EXPECT_CALL(*g_securewrapperMock, v_secure_system(StrEq(expectedCmd), _))
         .Times(1)
         .WillOnce(Return(1));
+
+    #endif
     assignIpToBridge(bridgeName, l3netName);
 }
 
@@ -826,7 +1018,6 @@ TEST_F(BridgeUtilsTestFixture, getCurrentIfListPopenFail)
     ovsEnable = 0;
     bridgeUtilEnable = 1;
     char bridge[] = "brlan1";
-    /* CID :249149 Out-of-bounds access (OVERRUN) */
     char ifList[TOTAL_IFLIST_SIZE] = {0};
 
     char expectedCmd[128] = {0} ;
@@ -1087,13 +1278,28 @@ TEST_F(BridgeUtilsTestFixture, AddOrDeletePortOvsFailGetConfig)
 }
 
 TEST_F(BridgeUtilsTestFixture, AddOrDeletePortBridgeUtilsUp) {
-    char bridgeName[] = "brlan0";
+    bridgeDetails  bridgeInfo ;
+    memset(&bridgeInfo, 0, sizeof(bridgeDetails));
+    strncpy(bridgeInfo.bridgeName, "brlan0", sizeof(bridgeInfo.bridgeName) - 1);
+    //char bridgeName[] = "brlan0";
     char iface[] = "ath0";
     ovsEnable = 0;
     bridgeUtilEnable = 1;
+
+
+    #ifdef CORE_NET_LIB
+    EXPECT_CALL(*g_libnetMock, bridge_get_info(StrEq(bridgeInfo.bridgeName), _))
+        .Times(3)
+        .WillRepeatedly(Return(CNL_STATUS_SUCCESS));
+
+    EXPECT_CALL(*g_libnetMock, interface_up(StrEq(bridgeInfo.bridgeName)))
+        .Times(2)
+        .WillRepeatedly(Return(CNL_STATUS_SUCCESS));
+    #else
+
     char expectedCmd[1024] = {0};
     snprintf(expectedCmd, sizeof(expectedCmd), "check_bridge=`brctl show %s` ;\t\t\t\t\tif [ \"$check_bridge\" = \"\" ];\t\t\t\t\tthen \t\t\t\t\t\tbrctl addbr %s ;\t\t\t\t\t\tifconfig %s up ; \t\t\t\t\tfi ;",
-             bridgeName, bridgeName, bridgeName);
+             bridgeInfo.bridgeName, bridgeInfo.bridgeName, bridgeInfo.bridgeName);
 
     EXPECT_CALL(*g_utilMock, system(StrEq(expectedCmd)))
         .Times(1)
@@ -1101,14 +1307,17 @@ TEST_F(BridgeUtilsTestFixture, AddOrDeletePortBridgeUtilsUp) {
 
     char expectedCmd1[1024] = {0};
     snprintf(expectedCmd1, sizeof(expectedCmd1), "for bridge in `brctl show | cut -f1 | awk 'NF > 0' | sed '1d' | grep -v %s `;\t\t\t\t\tdo \t\t\t\t\tcheck_if_attached=`brctl show $bridge | grep \"%s\" | grep -v \"%s.\"` ; \t\t\t\t\tif [ \"$check_if_attached\" != \"\" ] ;\t\t\t\t\t\tthen\t\t\t\t\t        echo \"deleting %s from $bridge\" ;\t\t\t\t\t        brctl delif $bridge %s ; \t\t\t\t\t fi ;\t\t\t\t\t done ;\t\t\t\t\t check_if_exist=`brctl show %s | grep \"%s\" | grep -v \"%s.\"` ; \t\t\t\t\t if [ \"$check_if_exist\" = \"\" ]; \t\t\t\t\t then \t\t\t\t\t \tifconfig %s up ;\t\t\t\t\t    \tbrctl addif %s %s ;\t\t\t\t\t fi ;",
-             bridgeName, iface, iface, iface, iface, bridgeName, iface, iface, bridgeName, bridgeName, iface);
+             bridgeInfo.bridgeName, iface, iface, iface, iface, bridgeInfo.bridgeName, iface, iface, bridgeInfo.bridgeName, bridgeInfo.bridgeName, iface);
 
     EXPECT_CALL(*g_utilMock, system(StrEq(expectedCmd1)))
         .Times(1)
         .WillOnce(Return(0));
+    #endif
 
-    AddOrDeletePort(bridgeName, iface, OVS_IF_UP_CMD);
+
+    AddOrDeletePort(bridgeInfo.bridgeName, iface, OVS_IF_UP_CMD);
 }
+
 
 TEST_F(BridgeUtilsTestFixture, AddOrDeletePortBridgeUtilsDelete)
 {
@@ -1116,19 +1325,28 @@ TEST_F(BridgeUtilsTestFixture, AddOrDeletePortBridgeUtilsDelete)
     char iface[] = "ath0";
     ovsEnable = 0;
     bridgeUtilEnable = 1;
+
+    #ifdef CORE_NET_LIB
+    EXPECT_CALL(*g_libnetMock, interface_remove_from_bridge(StrEq(iface)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    #else
+
     char expectedCmd[216] = {0};
     memset(expectedCmd,0,sizeof(expectedCmd));
     snprintf(expectedCmd,sizeof(expectedCmd),"brctl delif %s %s",bridgeName,iface);
     EXPECT_CALL(*g_utilMock, system(StrEq(expectedCmd)))
         .Times(1)
         .WillOnce(Return(1));
+
+    #endif
     
     AddOrDeletePort(bridgeName, iface, OVS_BR_REMOVE_CMD);
 }
 
 TEST_F(BridgeUtilsTestFixture, AddOrDeletePortFail)
 {
-    /* CID :249134 Destination buffer too small (STRING_OVERFLOW) */
     char bridgeName[64] = "";
     char iface[] = "ath0";
     AddOrDeletePort(bridgeName, iface, OVS_BR_REMOVE_CMD);
@@ -1535,11 +1753,40 @@ TEST_F(BridgeUtilsTestFixture, CreateBrInterfaceLnF)
             ::testing::Return(100)
         ));
 
+    #ifdef CORE_NET_LIB
+    
+    using namespace testing;
+    const char* ipAddr = "192.168.10.11";
+    unsigned int prefix_len = 24;
+    int size = INET_ADDRSTRLEN;    
+    char bridgeName[] = "br106";
+
+    EXPECT_CALL(*g_libnetMock, addr_derive_broadcast(StrEq(ipAddr), Eq(prefix_len), NotNull(), Eq(size)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    char expectedArgs1[300];
+    snprintf(expectedArgs1, sizeof(expectedArgs1), "%s/%d broadcast  dev %s", ipAddr, prefix_len,bridgeName);
+
+    EXPECT_CALL(*g_libnetMock, addr_add(StrEq(expectedArgs1)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    char expectedArgs2[300];
+    snprintf(expectedArgs2, sizeof(expectedArgs2), "dev %s %s", bridgeName,ipAddr);
+
+    EXPECT_CALL(*g_libnetMock, addr_add(StrEq(expectedArgs2)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+    #else
+
     char expectedCmd123[216] = {0};
     snprintf(expectedCmd123, sizeof(expectedCmd123), "ifconfig %s %s", eventValues[0], expectedValue21); \
     EXPECT_CALL(*g_securewrapperMock, v_secure_system(::testing::HasSubstr(expectedCmd123), _))
         .Times(1)
         .WillOnce(Return(0));
+
+    #endif
 
     EXPECT_CALL(*g_bridgeUtilsGenericMock, HandlePostConfigVendorGeneric(_, _))
         .Times(1)
@@ -1567,6 +1814,7 @@ TEST_F(BridgeUtilsTestFixture, CreateBrInterfaceLnF)
 
 TEST_F(BridgeUtilsTestFixture, CreateBrInterfaceMocaIsolation)
 {
+    using namespace testing;
     char event[64] = {0}, value[64] = {0};
     InstanceNumber = MOCA_ISOLATION;
     ovsEnable = 1;
@@ -1686,6 +1934,58 @@ TEST_F(BridgeUtilsTestFixture, CreateBrInterfaceMocaIsolation)
             ::testing::Return(100)
         ));
 
+    #ifdef CORE_NET_LIB
+
+    const char* ipAddr = "169.254.30.1";
+    const char* subNetMask = "255.255.255.0";
+    char args[300] = {0};
+    unsigned int prefix_len = 24;
+    char bridgeInfo[] = "brlan1";
+    char bcast[INET_ADDRSTRLEN] = "";
+    int size = INET_ADDRSTRLEN;
+
+    EXPECT_CALL(*g_libnetMock, addr_derive_broadcast(StrEq(ipAddr), Eq(prefix_len), NotNull(), Eq(size)))
+    .Times(1)
+    .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    char expectedArgs1[300];
+    snprintf(expectedArgs1, sizeof(expectedArgs1), "%s/%d broadcast  dev %s", ipAddr, prefix_len,bridgeInfo);
+
+    EXPECT_CALL(*g_libnetMock, addr_add(StrEq(expectedArgs1)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    EXPECT_CALL(*g_libnetMock, interface_set_flags(StrEq(bridgeInfo), Eq(512)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    char expectedArgs2[300];
+    snprintf(expectedArgs2, sizeof(expectedArgs2), "dev %s %s", bridgeInfo,ipAddr);
+
+    EXPECT_CALL(*g_libnetMock, addr_add(StrEq(expectedArgs2)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    EXPECT_CALL(*g_libnetMock, interface_up(StrEq(bridgeInfo)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    char expectedCommand[256];
+    snprintf(expectedCommand, sizeof(expectedCommand), "echo 0 > /proc/sys/net/ipv4/conf/'%s'/rp_filter ;\t\t\t\ttouch %s ", bridgeInfo, LOCAL_MOCABR_UP_FILE);
+
+    EXPECT_CALL(*g_securewrapperMock, v_secure_system(StrEq(expectedCommand), _))
+        .Times(1)
+        .WillOnce(Return(0));
+
+    EXPECT_CALL(*g_securewrapperMock, v_secure_system(StrEq("echo 0 > /proc/sys/net/ipv4/icmp_echo_ignore_broadcasts ;\t\t\t\tsysctl -w net.ipv4.conf.all.arp_announce=3 ;"), _))
+        .Times(1)
+        .WillOnce(Return(0));
+
+    EXPECT_CALL(*g_libnetMock, rule_add(StrEq("from all iif brlan1 lookup all_lans")))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    #else
     char expectedCmd123[512] = {0};
     snprintf(expectedCmd123, sizeof(expectedCmd123), "ip link set %s allmulticast on ; \
         ifconfig %s %s ; \
@@ -1706,7 +2006,7 @@ TEST_F(BridgeUtilsTestFixture, CreateBrInterfaceMocaIsolation)
     EXPECT_CALL(*g_securewrapperMock, v_secure_system(StrEq(expectedCmd124), _))
         .Times(1)
         .WillOnce(Return(0));
-
+    #endif
     EXPECT_CALL(*g_bridgeUtilsGenericMock, HandlePostConfigVendorGeneric(_, _))
         .Times(1)
         .WillOnce(Return(0));
@@ -1736,6 +2036,7 @@ TEST_F(BridgeUtilsTestFixture, CreateBrInterfaceMocaIsolation)
 
 TEST_F(BridgeUtilsTestFixture, CreateBrInterfaceMesh)
 {
+    using namespace testing;
     char event[64] = {0} , value[64] = {0};
     InstanceNumber = MESH_BACKHAUL;
     ovsEnable = 1;
@@ -1841,11 +2142,52 @@ TEST_F(BridgeUtilsTestFixture, CreateBrInterfaceMesh)
             ::testing::Return(100)
         ));
 
+    #ifdef CORE_NET_LIB
+
+    const char* ipAddr = "192.168.245.254";
+    const char* subNetMask = "255.255.255.0";
+    char args[300] = {0};
+    unsigned int prefix_len = 24;
+    char bridgeInfo[] = "br403";
+    char bcast[INET_ADDRSTRLEN] = "";
+    int size = INET_ADDRSTRLEN;
+
+    EXPECT_CALL(*g_libnetMock, addr_derive_broadcast(StrEq(ipAddr), Eq(prefix_len), NotNull(), Eq(size)))
+    .Times(1)
+    .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    char expectedArgs1[300];
+    snprintf(expectedArgs1, sizeof(expectedArgs1), "%s/%d broadcast  dev %s", ipAddr, prefix_len,bridgeInfo);
+
+    EXPECT_CALL(*g_libnetMock, addr_add(StrEq(expectedArgs1)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    char expectedArgs2[300];
+    snprintf(expectedArgs2, sizeof(expectedArgs2), "dev %s %s", bridgeInfo,ipAddr);
+
+    EXPECT_CALL(*g_libnetMock, addr_add(StrEq(expectedArgs2)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    EXPECT_CALL(*g_libnetMock, interface_up(StrEq(bridgeInfo)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    EXPECT_CALL(*g_libnetMock, interface_set_netmask(StrEq(bridgeInfo), StrEq(subNetMask)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    #else
+
+
     char expectedCmd123[216] = {0};
     snprintf(expectedCmd123, sizeof(expectedCmd123), "ifconfig %s %s", "br403", expectedValue21);
     EXPECT_CALL(*g_securewrapperMock, v_secure_system(::testing::HasSubstr(expectedCmd123), _))
         .Times(1)
         .WillOnce(Return(0));
+
+    #endif
 
     EXPECT_CALL(*g_bridgeUtilsGenericMock, HandlePostConfigVendorGeneric(_, _))
         .Times(1)
@@ -1876,6 +2218,7 @@ TEST_F(BridgeUtilsTestFixture, CreateBrInterfaceMesh)
 
 TEST_F(BridgeUtilsTestFixture, CreateBrInterfaceMeshWiFi2G)
 {
+    using namespace testing;
     char event[64] = {0}, value[64] = {0};
     InstanceNumber = MESH_WIFI_BACKHAUL_2G;
     ovsEnable = 1;
@@ -1982,12 +2325,51 @@ TEST_F(BridgeUtilsTestFixture, CreateBrInterfaceMeshWiFi2G)
             ::testing::Return(100)
         ));
 
+    #ifdef CORE_NET_LIB
+
+    const char* ipAddr = "169.254.0.1";
+    const char* subNetMask = "255.255.255.0";
+    char args[300] = {0};
+    unsigned int prefix_len = 24;
+    char bridgeInfo[] = "brlan112";
+    char bcast[INET_ADDRSTRLEN] = "";
+    int size = INET_ADDRSTRLEN;
+
+    char expectedArgs2[300];
+    snprintf(expectedArgs2, sizeof(expectedArgs2), "dev %s %s", bridgeInfo,ipAddr);
+
+    EXPECT_CALL(*g_libnetMock, addr_add(StrEq(expectedArgs2)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    EXPECT_CALL(*g_libnetMock, addr_derive_broadcast(StrEq(ipAddr), Eq(prefix_len), NotNull(), Eq(size)))
+    .Times(1)
+    .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    char expectedArgs1[300];
+    snprintf(expectedArgs1, sizeof(expectedArgs1), "%s/%d broadcast  dev %s", ipAddr, prefix_len,bridgeInfo);
+
+    EXPECT_CALL(*g_libnetMock, addr_add(StrEq(expectedArgs1)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    EXPECT_CALL(*g_libnetMock, interface_set_netmask(StrEq(bridgeInfo), StrEq(subNetMask)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    EXPECT_CALL(*g_libnetMock, interface_up(StrEq(bridgeInfo)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    #else
+
     char expectedCmd123[216] = {0};
     snprintf(expectedCmd123, sizeof(expectedCmd123), "ifconfig %s %s netmask %s up", "brlan112", expectedValue21, expectedValue31);
     EXPECT_CALL(*g_securewrapperMock, v_secure_system(::testing::HasSubstr(expectedCmd123), _))
         .Times(1)
         .WillOnce(Return(0));
 
+    #endif
     EXPECT_CALL(*g_bridgeUtilsGenericMock, HandlePostConfigVendorGeneric(_, _))
         .Times(1)
         .WillOnce(Return(0));
@@ -2014,7 +2396,6 @@ TEST_F(BridgeUtilsTestFixture, CreateBrInterfaceMeshWiFi2G)
 
     CreateBrInterface();
 }
-
 
 TEST_F(BridgeUtilsTestFixture, CreateBrInterfaceMeshWiFi5G)
 {
@@ -2131,12 +2512,51 @@ TEST_F(BridgeUtilsTestFixture, CreateBrInterfaceMeshWiFi5G)
             ));
     }
 
+    #ifdef CORE_NET_LIB
+
+    const char* ipAddr = "169.254.1.1";
+    const char* subNetMask = "255.255.255.0";
+    char args[300] = {0};
+    unsigned int prefix_len = 24;
+    char bridgeInfo[] = "brlan113";
+    char bcast[INET_ADDRSTRLEN] = "";
+    int size = INET_ADDRSTRLEN;
+
+    char expectedArgs2[300];
+    snprintf(expectedArgs2, sizeof(expectedArgs2), "dev %s %s", bridgeInfo,ipAddr);
+
+    EXPECT_CALL(*g_libnetMock, addr_add(StrEq(expectedArgs2)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    EXPECT_CALL(*g_libnetMock, addr_derive_broadcast(StrEq(ipAddr), Eq(prefix_len), NotNull(), Eq(size)))
+    .Times(1)
+    .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    char expectedArgs1[300];
+    snprintf(expectedArgs1, sizeof(expectedArgs1), "%s/%d broadcast  dev %s", ipAddr, prefix_len,bridgeInfo);
+
+    EXPECT_CALL(*g_libnetMock, addr_add(StrEq(expectedArgs1)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    EXPECT_CALL(*g_libnetMock, interface_set_netmask(StrEq(bridgeInfo), StrEq(subNetMask)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    EXPECT_CALL(*g_libnetMock, interface_up(StrEq(bridgeInfo)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+    #else
+
+
     char expectedCmd123[216] = {0};
     snprintf(expectedCmd123, sizeof(expectedCmd123), "ifconfig %s %s netmask %s up", params[0].expectedValue, l3netExpectedValues[0], l3netExpectedValues[1]);
     EXPECT_CALL(*g_securewrapperMock, v_secure_system(::testing::HasSubstr(expectedCmd123), _))
         .Times(1)
         .WillOnce(Return(0));
 
+    #endif
     EXPECT_CALL(*g_bridgeUtilsGenericMock, HandlePostConfigVendorGeneric(_, _))
         .Times(1)
         .WillOnce(Return(0));
@@ -2473,12 +2893,20 @@ TEST_F(BridgeUtilsTestFixture, DeleteBrInterface)
             ));
     }
 
+    #ifdef CORE_NET_LIB
+    char bridgeInfo[] = "br106";
+    EXPECT_CALL(*g_libnetMock, interface_down(StrEq(bridgeInfo)))
+        .Times(1)
+        .WillOnce(Return(CNL_STATUS_SUCCESS));
+
+    #else
+
     char expectedCmd[256] = {0};
     snprintf(expectedCmd, sizeof(expectedCmd), "ip link set %s down", params[0].expectedValue);
     EXPECT_CALL(*g_securewrapperMock, v_secure_system(::testing::HasSubstr(expectedCmd), _))
         .Times(1)
         .WillOnce(Return(0));
-
+    #endif
     EXPECT_CALL(*g_bridgeUtilsGenericMock, HandlePreConfigVendorGeneric(_, _))
         .Times(1)
         .WillOnce(Return(0));
