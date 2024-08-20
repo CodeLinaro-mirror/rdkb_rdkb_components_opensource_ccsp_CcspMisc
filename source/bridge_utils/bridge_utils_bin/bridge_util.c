@@ -100,8 +100,10 @@ static char *mocaIsolationL3Net = "dmsb.MultiLAN.MoCAIsoLation_l3net";
 #endif
 static char *LnFL3Net = "dmsb.MultiLAN.LnF_l3net";
 static char *MeshBhaulL3Net = "dmsb.MultiLAN.MeshBhaul_l3net";
+static char *MeshOnboardL3Net = "dmsb.MultiLAN.MeshOnboard_l3net";
 static char *MeshWiFiBhaulL3Net_2G = "dmsb.MultiLAN.MeshWiFiBhaul_2G_l3net";
 static char *MeshWiFiBhaulL3Net_5G = "dmsb.MultiLAN.MeshWiFiBhaul_5G_l3net";
+static char *MeshWiFiOnboardL3Net_2G = "dmsb.MultiLAN.MeshWiFiOnboard_2G_l3net";
 static char *EthBhaulL3Net = "dmsb.MultiLAN.EthBhaul_l3net";
 #if defined (WIFI_MANAGE_SUPPORTED)
 static char *ManageWiFiData = "dmsb.MultiLAN.ManageWiFi_l3net";
@@ -474,9 +476,13 @@ int getMTU(int InstanceNumber)
 
 		case MESH_BACKHAUL:
 
+        case MESH_ONBOARD:
+
 		case MESH_WIFI_BACKHAUL_2G:
 
 		case MESH_WIFI_BACKHAUL_5G:
+
+        case MESH_WIFI_ONBOARD_2G:
 					mtu = 1600 ;
 					break;	
 		case ETH_BACKHAUL:
@@ -1444,6 +1450,13 @@ int HandlePostConfigGeneric(bridgeDetails *bridgeInfo,int InstanceNumber)
                     			}
 					break;
 
+            case MESH_ONBOARD :
+                    if ( BridgeOprInPropgress == CREATE_BRIDGE )
+                    {
+                        assignIpToBridge(bridgeInfo->bridgeName,MeshOnboardL3Net);
+                    }
+                    break;
+
             case ETH_BACKHAUL:
                 if ( BridgeOprInPropgress == CREATE_BRIDGE )
                 {
@@ -1467,6 +1480,18 @@ int HandlePostConfigGeneric(bridgeDetails *bridgeInfo,int InstanceNumber)
 					assignIpToBridge(bridgeInfo->bridgeName,MeshWiFiBhaulL3Net_5G);
 				}
 				break;
+
+            case MESH_WIFI_ONBOARD_2G:
+                if ( BridgeOprInPropgress == CREATE_BRIDGE )
+                {
+                    assignIpToBridge(bridgeInfo->bridgeName,MeshWiFiOnboardL3Net_2G);
+#if !defined(USE_LINUX_BRIDGE)
+                    v_secure_system("ovs-vsctl set int %s mtu_request=1600",bridgeInfo->bridgeName);
+#else
+                    v_secure_system("ifconfig %s mtu 1600",bridgeInfo->bridgeName);
+#endif
+                }
+                break;
 
 #if defined (WIFI_MANAGE_SUPPORTED)
             case MANAGE_WIFI_BRIDGE:
@@ -3092,6 +3117,12 @@ int bridgeUtils_main(int argc, char *argv[])
     {
         BridgeOprInPropgress = CREATE_BRIDGE;
         InstanceNumber = MESH_BACKHAUL;
+        CreateBrInterface();
+    }
+    else if ( (strcmp(Cmd_Opr,"meshonboard-setup") == 0 ) )
+    {
+        BridgeOprInPropgress = CREATE_BRIDGE;
+        InstanceNumber = MESH_ONBOARD;
         CreateBrInterface();
     }
     else if ( (strcmp(Cmd_Opr, "meshethbhaul-up") == 0 ) )
