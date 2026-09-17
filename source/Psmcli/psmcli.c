@@ -1434,7 +1434,7 @@ unsigned int process_dumpall(int const argCnt, char const * const argVars[], cha
 
     func_ret = PsmEnumRecords((void*)busHandle,
                               subsys_prefix,
-                              "",        /* root - enumerate everything */
+                              ".",        /* root - enumerate everything */
                               0,         /* nextLevel=false -> recurse  */
                               &numRec,
                               &pRecArray);
