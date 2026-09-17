@@ -1431,10 +1431,15 @@ unsigned int process_dumpall(int const argCnt, char const * const argVars[], cha
     PCCSP_BASE_RECORD   pRecArray   = NULL;
     unsigned int        i           = 0;
     char const func_name[]          = "process_dumpall";
+    const char         *enum_root   = "";
+
+#ifdef CORD_ENABLED
+    enum_root = ".";
+#endif
 
     func_ret = PsmEnumRecords((void*)busHandle,
                               subsys_prefix,
-                              ".",        /* root - enumerate everything */
+                              enum_root,   /* root differs for CORD/non-CORD */
                               0,         /* nextLevel=false -> recurse  */
                               &numRec,
                               &pRecArray);

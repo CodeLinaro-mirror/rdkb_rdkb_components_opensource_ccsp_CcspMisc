@@ -22,4 +22,8 @@ bin_PROGRAMS = psmcli
 
 psmcli_SOURCES = psmcli.c
 
+if CORD_ENABLED
+psmcli_CFLAGS += -DCORD_ENABLED
+endif
+
 psmcli_LDFLAGS = -lccsp_common

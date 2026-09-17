@@ -136,6 +136,18 @@ no)  DHCP_MANAGER_ENABLE=false ;;
 esac],[DHCP_MANAGER_ENABLE=false])
 AM_CONDITIONAL([DHCP_MANAGER_ENABLE], [test x$DHCP_MANAGER_ENABLE = xtrue])
 
+AC_ARG_ENABLE([cord],
+             AS_HELP_STRING([--enable-cord],[enable CORD support (default is no)]),
+             [
+               case "${enableval}" in
+                yes) CORD_ENABLED=true ;;
+                no)  CORD_ENABLED=false ;;
+                 *) AC_MSG_ERROR([bad value ${enableval} for --enable-cord]);;
+               esac
+             ],
+             [CORD_ENABLED=false])
+AM_CONDITIONAL([CORD_ENABLED], [test x$CORD_ENABLED = xtrue])
+
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_MACRO_DIR([m4])
 
