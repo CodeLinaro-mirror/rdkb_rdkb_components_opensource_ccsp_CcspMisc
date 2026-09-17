@@ -21,6 +21,7 @@ AM_CFLAGS =
 bin_PROGRAMS = psmcli
 
 psmcli_SOURCES = psmcli.c
+psmcli_CFLAGS =
 
 if CORD_ENABLED
 psmcli_CFLAGS += -DCORD_ENABLED
