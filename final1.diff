@@ -1,0 +1,34 @@
+diff --git a/source/bridge_utils/bridge_utils_bin/bridge_util.c b/source/bridge_utils/bridge_utils_bin/bridge_util.c
+index ad8370f..db0228b 100644
+--- a/source/bridge_utils/bridge_utils_bin/bridge_util.c
++++ b/source/bridge_utils/bridge_utils_bin/bridge_util.c
+@@ -39,6 +39,7 @@
+ #define WFO_ENABLED        "/etc/WFO_enabled"
+ #define DEFAULT_NETMASK_ADDR "255.255.255.0"
+ #define BRCTL_INTERACT_ENABLE_FILE "/var/tmp/brctl_interact_enable.txt"
++#define MULTINET_INSTANCE_COUNTER "multinet-instance-counter"
+ #define isValidSubnetByte(byte) (((byte == 255) || (byte == 254) || (byte == 252) || \
+                                   (byte == 248) || (byte == 240) || (byte == 224) || \
+                                   (byte == 192) || (byte == 128)) ? 1 : 0)
+@@ -1936,6 +1937,21 @@ int CreateBrInterface()
+ 	snprintf(val,sizeof(val),"%d",bridgeInfo->vlanID);
+ 	sysevent_set(syseventfd_vlan, sysevent_token_vlan, event_name, val, 0);
+ 
++	char counter_val[16] = {0};
++	int instance_counter = 1;
++	if ((sysevent_get(syseventfd_vlan, sysevent_token_vlan, MULTINET_INSTANCE_COUNTER,
++	                 counter_val, sizeof(counter_val)) == 0) && (atoi(counter_val) > 0))
++	{
++		instance_counter = atoi(counter_val) + 1;
++	}
++
++	snprintf(counter_val, sizeof(counter_val), "%d", instance_counter);
++	sysevent_set(syseventfd_vlan, sysevent_token_vlan, MULTINET_INSTANCE_COUNTER, counter_val, 0);
++
++	snprintf(event_name,sizeof(event_name),"multinet_%d-instance",instance_counter);
++	snprintf(val,sizeof(val),"%d",InstanceNumber);
++	sysevent_set(syseventfd_vlan, sysevent_token_vlan, event_name, val, 0);
++
+ 	if ( bridgeInfo->vlan_name[0] != '\0' )
+         {
+                 bridgeCreated = 1 ;

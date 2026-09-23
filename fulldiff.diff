@@ -1,0 +1,235 @@
+diff --git a/source/bridge_utils/bridge_utils_bin/bridge_util.c b/source/bridge_utils/bridge_utils_bin/bridge_util.c
+index ad8370f..db0228b 100644
+--- a/source/bridge_utils/bridge_utils_bin/bridge_util.c
++++ b/source/bridge_utils/bridge_utils_bin/bridge_util.c
+@@ -39,6 +39,7 @@
+ #define WFO_ENABLED        "/etc/WFO_enabled"
+ #define DEFAULT_NETMASK_ADDR "255.255.255.0"
+ #define BRCTL_INTERACT_ENABLE_FILE "/var/tmp/brctl_interact_enable.txt"
++#define MULTINET_INSTANCE_COUNTER "multinet-instance-counter"
+ #define isValidSubnetByte(byte) (((byte == 255) || (byte == 254) || (byte == 252) || \
+                                   (byte == 248) || (byte == 240) || (byte == 224) || \
+                                   (byte == 192) || (byte == 128)) ? 1 : 0)
+@@ -1936,6 +1937,21 @@ int CreateBrInterface()
+ 	snprintf(val,sizeof(val),"%d",bridgeInfo->vlanID);
+ 	sysevent_set(syseventfd_vlan, sysevent_token_vlan, event_name, val, 0);
+ 
++	char counter_val[16] = {0};
++	int instance_counter = 1;
++	if ((sysevent_get(syseventfd_vlan, sysevent_token_vlan, MULTINET_INSTANCE_COUNTER,
++	                 counter_val, sizeof(counter_val)) == 0) && (atoi(counter_val) > 0))
++	{
++		instance_counter = atoi(counter_val) + 1;
++	}
++
++	snprintf(counter_val, sizeof(counter_val), "%d", instance_counter);
++	sysevent_set(syseventfd_vlan, sysevent_token_vlan, MULTINET_INSTANCE_COUNTER, counter_val, 0);
++
++	snprintf(event_name,sizeof(event_name),"multinet_%d-instance",instance_counter);
++	snprintf(val,sizeof(val),"%d",InstanceNumber);
++	sysevent_set(syseventfd_vlan, sysevent_token_vlan, event_name, val, 0);
++
+ 	if ( bridgeInfo->vlan_name[0] != '\0' )
+         {
+                 bridgeCreated = 1 ;
+diff --git a/source/test/bridge_utils/bridgeUtilsTest.cpp b/source/test/bridge_utils/bridgeUtilsTest.cpp
+index 729ad7c..5f58a0e 100644
+--- a/source/test/bridge_utils/bridgeUtilsTest.cpp
++++ b/source/test/bridge_utils/bridgeUtilsTest.cpp
+@@ -167,6 +167,10 @@ class BridgeUtilsTestFixture : public ::testing::TestWithParam<int> {
+         }
+         virtual void SetUp()
+         {
++            ON_CALL(mockedSysevent, sysevent_get(_, _, StrEq("multinet-instance-counter"), _, _))
++                .WillByDefault(Return(-1));
++            ON_CALL(mockedSysevent, sysevent_set(_, _, StrEq("multinet-instance-counter"), _, _))
++                .WillByDefault(Return(0));
+             bridge_util_log("%s %s %s\n", __func__,
+                 ::testing::UnitTest::GetInstance()->current_test_info()->test_case_name(),
+                 ::testing::UnitTest::GetInstance()->current_test_info()->name());
+@@ -1500,6 +1504,20 @@ TEST_F(BridgeUtilsTestFixture, CreateBrInterface)
+ 	 .Times(1)
+         .WillOnce(Return(0));
+ 
++    EXPECT_CALL(*g_syseventMock, sysevent_get(_, _, StrEq("multinet-instance-counter"), _, _))
++        .Times(1)
++        .WillOnce(Return(-1));
++    EXPECT_CALL(*g_syseventMock, sysevent_set(_, _, StrEq("multinet-instance-counter"), StrEq("1"), _))
++        .Times(1)
++        .WillOnce(Return(0));
++
++    char event3[64] = {0} , value3[64] = {0};
++    snprintf(event3,sizeof(event3),"multinet_1-instance");
++    snprintf(value3,sizeof(value3),"%d",InstanceNumber);
++    EXPECT_CALL(*g_syseventMock, sysevent_set(_, _, StrEq(event3), StrEq(value3), _))
++	 .Times(1)
++        .WillOnce(Return(0));
++
+     // OVS interactions
+     Gateway_Config *pGwConfig = (Gateway_Config*) malloc(sizeof(Gateway_Config));
+     memset(pGwConfig, 0, sizeof(Gateway_Config));
+@@ -1600,6 +1618,13 @@ TEST_F(BridgeUtilsTestFixture, CreateBrInterfaceInst1ETHWAN)
+ 	 .Times(1)
+         .WillOnce(Return(0));
+ 
++    char event3[64] = {0} , value3[64] = {0};
++    snprintf(event3,sizeof(event3),"multinet_1-instance");
++    snprintf(value3,sizeof(value3),"%d",InstanceNumber);
++    EXPECT_CALL(*g_syseventMock, sysevent_set(_, _, StrEq(event3), StrEq(value3), _))
++	 .Times(1)
++        .WillOnce(Return(0));
++
+     Gateway_Config *pGwConfig = NULL;
+     pGwConfig = (Gateway_Config*) malloc(sizeof(Gateway_Config));
+     memset(pGwConfig, 0, sizeof(Gateway_Config));
+@@ -1692,11 +1717,13 @@ TEST_F(BridgeUtilsTestFixture, CreateBrInterfaceLnF)
+ 
+     const char* eventNames[] = {
+         "multinet_%d-name",
+-        "multinet_%d-vid"
++        "multinet_%d-vid",
++        "multinet_1-instance"
+     };
+ 
+     const char* eventValues[] = {
+         "br106",
++        "106",
+         "106"
+     };
+ 
+@@ -1877,6 +1904,13 @@ TEST_F(BridgeUtilsTestFixture, CreateBrInterfaceMocaIsolation)
+         .Times(1)
+         .WillOnce(Return(0));
+ 
++    char event3[64] = {0}, value3[64] = {0};
++    snprintf(event3, sizeof(event3), "multinet_1-instance");
++    snprintf(value3, sizeof(value3), "%d", InstanceNumber);
++    EXPECT_CALL(*g_syseventMock, sysevent_set(_, _, StrEq(event3), StrEq(value3), _))
++        .Times(1)
++        .WillOnce(Return(0));
++
+     Gateway_Config *pGwConfig = NULL;
+     pGwConfig = (Gateway_Config*)malloc(sizeof(Gateway_Config));
+     memset(pGwConfig, 0, sizeof(Gateway_Config));
+@@ -2095,6 +2129,24 @@ TEST_F(BridgeUtilsTestFixture, CreateBrInterfaceMesh)
+     EXPECT_CALL(*g_syseventMock, sysevent_set(_, _, StrEq(event2), StrEq(value2), _))
+         .Times(1)
+         .WillOnce(Return(0));
++
++    char instanceCounter[] = "7";
++    EXPECT_CALL(*g_syseventMock, sysevent_get(_, _, StrEq("multinet-instance-counter"), _, _))
++        .Times(1)
++        .WillOnce(::testing::DoAll(
++            SetArgNPointeeTo<3>(instanceCounter, sizeof(instanceCounter)),
++            Return(0)
++        ));
++    EXPECT_CALL(*g_syseventMock, sysevent_set(_, _, StrEq("multinet-instance-counter"), StrEq("8"), _))
++        .Times(1)
++        .WillOnce(Return(0));
++
++    char event3[64] = {0}, value3[64] = {0};
++    snprintf(event3,sizeof(event3),"multinet_8-instance");
++    snprintf(value3,sizeof(value3),"%d",InstanceNumber);
++    EXPECT_CALL(*g_syseventMock, sysevent_set(_, _, StrEq(event3), StrEq(value3), _))
++        .Times(1)
++        .WillOnce(Return(0));
+     
+     Gateway_Config *pGwConfig = NULL;
+     pGwConfig = (Gateway_Config*) malloc(sizeof(Gateway_Config));
+@@ -2278,6 +2330,13 @@ TEST_F(BridgeUtilsTestFixture, CreateBrInterfaceMeshWiFi2G)
+         .Times(1)
+         .WillOnce(Return(0));
+ 
++    char event3[64] = {0}, value3[64] = {0};
++    snprintf(event3, sizeof(event3), "multinet_1-instance");
++    snprintf(value3, sizeof(value3), "%d", InstanceNumber);
++    EXPECT_CALL(*g_syseventMock, sysevent_set(_, _, StrEq(event3), StrEq(value3), _))
++        .Times(1)
++        .WillOnce(Return(0));
++
+     Gateway_Config *pGwConfig = NULL;
+     pGwConfig = (Gateway_Config*) malloc(sizeof(Gateway_Config));
+     memset(pGwConfig, 0, sizeof(Gateway_Config));
+@@ -2448,15 +2507,17 @@ TEST_F(BridgeUtilsTestFixture, CreateBrInterfaceMeshWiFi5G)
+ 
+     const char* syseventParams[] = {
+         "multinet_%d-name",
+-        "multinet_%d-vid"
++        "multinet_%d-vid",
++        "multinet_1-instance"
+     };
+ 
+     const char* syseventValues[] = {
+         "brlan113",
++        "113",
+         "113"
+     };
+ 
+-    for (int i = 0; i < 2; ++i) {
++    for (int i = 0; i < 3; ++i) {
+         char event[64] = {0}, value[64] = {0};
+         snprintf(event, sizeof(event), syseventParams[i], InstanceNumber);
+         snprintf(value, sizeof(value), "%s", syseventValues[i]);
+@@ -2663,6 +2724,13 @@ TEST_F(BridgeUtilsTestFixture, CreateBrInterfaceHotspot2G)
+         .Times(1)
+         .WillOnce(Return(0));
+ 
++    char event3[64] = {0}, value3[64] = {0};
++    snprintf(event3, sizeof(event3), "multinet_1-instance");
++    snprintf(value3, sizeof(value3), "%d", InstanceNumber);
++    EXPECT_CALL(*g_syseventMock, sysevent_set(_, _, StrEq(event3), StrEq(value3), _))
++        .Times(1)
++        .WillOnce(Return(0));
++
+     Gateway_Config *pGwConfig = (Gateway_Config*) malloc(sizeof(Gateway_Config));
+     memset(pGwConfig, 0, sizeof(Gateway_Config));
+     pGwConfig->if_type = OVS_OTHER_IF_TYPE;
+@@ -2781,15 +2849,17 @@ for (int i = 0; i < sizeof(params) / sizeof(params[0]); ++i) {
+ 
+     const char* syseventParams[] = {
+         "multinet_%d-name",
+-        "multinet_%d-vid"
++        "multinet_%d-vid",
++        "multinet_1-instance"
+     };
+ 
+     const char* syseventValues[] = {
+         "brlan5",
++        "105",
+         "105"
+     };
+ 
+-    for (int i = 0; i < 2; ++i) {
++    for (int i = 0; i < 3; ++i) {
+         char event[64] = {0}, value[64] = {0};
+         snprintf(event, sizeof(event), syseventParams[i], InstanceNumber);
+         snprintf(value, sizeof(value), "%s", syseventValues[i]);
+@@ -3009,11 +3079,13 @@ TEST_F(BridgeUtilsTestFixture, SyncBrInterfaces)
+ 
+     const char* events[] = {
+         "multinet_%d-name",
+-        "multinet_%d-vid"
++        "multinet_%d-vid",
++        "multinet_1-instance"
+     };
+ 
+     const char* values[] = {
+         "brlan1",
++        "101",
+         "101"
+     };
+ 
+@@ -3137,6 +3209,13 @@ TEST_F(BridgeUtilsTestFixture, SyncBrInterfacesBridgeMode)
+ 	 .Times(1)
+         .WillOnce(Return(0));
+ 
++    char event3[64] = {0} , value3[64] = {0};
++    snprintf(event3,sizeof(event3),"multinet_1-instance");
++    snprintf(value3,sizeof(value3),"%d",InstanceNumber);
++    EXPECT_CALL(*g_syseventMock, sysevent_set(_, _, StrEq(event3), StrEq(value3), _))
++	 .Times(1)
++        .WillOnce(Return(0));
++
+     EXPECT_CALL(*g_bridgeUtilsGenericMock, HandlePreConfigVendorGeneric(_, _))
+ 	 .Times(1)
+         .WillOnce(Return(0));
