@@ -3053,21 +3053,47 @@ static void UpdateMultinetInstances(void)
 	unsigned int instanceCount = 0;
 	unsigned int i;
 	int instanceRet;
+	size_t instancesLength = 0;
+	CCSP_MESSAGE_BUS_INFO *busInfo;
+
+	if (bus_handle == NULL)
+	{
+		bridge_util_log("%s: message bus handle is not initialized\n", __func__);
+		sysevent_set(syseventfd_vlan, sysevent_token_vlan, "multinet-instances", "", 0);
+		return;
+	}
+
+	busInfo = (CCSP_MESSAGE_BUS_INFO *)bus_handle;
+	if (busInfo->freefunc == NULL)
+	{
+		bridge_util_log("%s: message bus free function is not initialized\n", __func__);
+		sysevent_set(syseventfd_vlan, sysevent_token_vlan, "multinet-instances", "", 0);
+		return;
+	}
 
 	instanceRet = PsmGetNextLevelInstances(bus_handle, g_Subsystem, "dmsb.l2net.",
 									  &instanceCount, &instanceList);
-	bridge_util_log("%s: iRanjani ---> stances, ret code %d\n", __func__, instanceRet);
+	bridge_util_log("%s: PSM instance query returned %d\n", __func__, instanceRet);
 	if (instanceRet == CCSP_SUCCESS && (instanceCount == 0 || instanceList != NULL))
 	{
 		for (i = 0; i < instanceCount; i++)
 		{
 			snprintf(instanceValue, sizeof(instanceValue), "%u", instanceList[i]);
-			if (i > 0)
+			if (i > 0 && instancesLength < sizeof(multinetInstances) - 1)
 			{
-				strncat(multinetInstances, " ", sizeof(multinetInstances) - strlen(multinetInstances) - 1);
+				multinetInstances[instancesLength++] = ' ';
+				multinetInstances[instancesLength] = '\0';
 			}
-			strncat(multinetInstances, instanceValue,
-					sizeof(multinetInstances) - strlen(multinetInstances) - 1);
+			if (instancesLength < sizeof(multinetInstances) - 1)
+			{
+				int written = snprintf(multinetInstances + instancesLength,
+								  sizeof(multinetInstances) - instancesLength, "%s", instanceValue);
+				if (written > 0)
+				{
+					instancesLength += (size_t)written < sizeof(multinetInstances) - instancesLength ?
+						(size_t)written : sizeof(multinetInstances) - instancesLength - 1;
+				}
+			}
 		}
 	}
 	else
@@ -3078,7 +3104,7 @@ static void UpdateMultinetInstances(void)
 	sysevent_set(syseventfd_vlan, sysevent_token_vlan, "multinet-instances", multinetInstances, 0);
 	if (instanceList != NULL)
 	{
-		((CCSP_MESSAGE_BUS_INFO *)bus_handle)->freefunc(instanceList);
+		busInfo->freefunc(instanceList);
 	}
 }
 
