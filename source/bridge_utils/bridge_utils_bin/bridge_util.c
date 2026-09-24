@@ -46,6 +46,7 @@ static char *component_id = "ccsp.bridgeUtils";
 static char *pCfg 	= CCSP_MSG_BUS_CFG;
 static void  *bus_handle  = NULL;
 static cap_user   appcaps;
+static void UpdateMultinetInstances(void);
 
 int InstanceNumber = 0; 
 int DeviceMode = 0,ovsEnable = 0 , bridgeUtilEnable = 0 , skipWiFi=0 , ethWanEnabled =0 , PORT2ENABLE = 0, eb_enable = 0; // router = 0, bridge = 2
@@ -3044,6 +3045,43 @@ int HandleWifiInterface(char *Cmd_Opr)
 	return -1;
 }
 
+static void UpdateMultinetInstances(void)
+{
+	char instanceValue[16] = {0};
+	char multinetInstances[1024] = {0};
+	unsigned int *instanceList = NULL;
+	unsigned int instanceCount = 0;
+	unsigned int i;
+	int instanceRet;
+
+	instanceRet = PsmGetNextLevelInstances(bus_handle, g_Subsystem, "dmsb.l2net.",
+									  &instanceCount, &instanceList);
+	bridge_util_log("%s: iRanjani ---> stances, ret code %d\n", __func__, instanceRet);
+	if (instanceRet == CCSP_SUCCESS && (instanceCount == 0 || instanceList != NULL))
+	{
+		for (i = 0; i < instanceCount; i++)
+		{
+			snprintf(instanceValue, sizeof(instanceValue), "%u", instanceList[i]);
+			if (i > 0)
+			{
+				strncat(multinetInstances, " ", sizeof(multinetInstances) - strlen(multinetInstances) - 1);
+			}
+			strncat(multinetInstances, instanceValue,
+					sizeof(multinetInstances) - strlen(multinetInstances) - 1);
+		}
+	}
+	else
+	{
+		bridge_util_log("%s: failed to get dmsb.l2net instances, ret code %d\n", __func__, instanceRet);
+	}
+
+	sysevent_set(syseventfd_vlan, sysevent_token_vlan, "multinet-instances", multinetInstances, 0);
+	if (instanceList != NULL)
+	{
+		((CCSP_MESSAGE_BUS_INFO *)bus_handle)->freefunc(instanceList);
+	}
+}
+
 int bridgeUtils_main(int argc, char *argv[])
 {
 		
@@ -3053,7 +3091,13 @@ int bridgeUtils_main(int argc, char *argv[])
     	breakpad_ExceptionHandler();
     	#endif
 
-	if ( argc < 3 )
+	if (argc < 2)
+	{
+		bridge_util_log(" ERROR : Missing arguments, please pass valid number of arguments\n");
+		return -1;
+	}
+
+	if (strcmp(argv[1], "multinet-instances") != 0 && argc < 3)
 	{
 		bridge_util_log(" ERROR : Missing arguments, please pass valid number of arguments\n");
 		return -1;
@@ -3114,6 +3158,13 @@ int bridgeUtils_main(int argc, char *argv[])
 	}
 	
 	getSettings();
+
+	if (strcmp(Cmd_Opr, "multinet-instances") == 0)
+	{
+		UpdateMultinetInstances();
+		rc = 0;
+		goto EXIT;
+	}
 
 #if defined(USE_LINUX_BRIDGE)
 	if(bridgeUtilEnable == 0)
